@@ -1,69 +1,39 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
+from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.const import Platform, CONF_SCAN_INTERVAL
-from homeassistant.helpers import config_entry_oauth2_flow
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import DOMAIN, CONF_USE_SANDBOX, DEFAULT_UPDATE_INTERVAL_MIN
-from .coordinator import OuraDataUpdateCoordinator
-from .api import OuraApiClient
+from .const import DOMAIN, DEFAULT_POLL_INTERVAL_MIN
 
-PLATFORMS: list[Platform] = [Platform.SENSOR]
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    implementation = await config_entry_oauth2_flow.async_get_config_entry_implementation(hass, entry.data)
-    session = config_entry_oauth2_flow.OAuth2Session(hass, entry.data, implementation)
+PLATFORMS: list[str] = ["sensor"]
 
-    use_sandbox = entry.options.get(CONF_USE_SANDBOX, False)
-    client = OuraApiClient(session, use_sandbox=use_sandbox)
 
-    scan_interval_sec = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_UPDATE_INTERVAL_MIN * 60)
-    coordinator = OuraDataUpdateCoordinator(
-        hass,
-        client=client,
-        update_interval=timedelta(seconds=scan_interval_sec),
-        title=f"Oura {entry.title}",
-    )
-    await coordinator.async_config_entry_first_refresh()
-
-    # Device info per account
-    device_info = None
-    try:
-        pi = coordinator.data.payloads.get("personal_info", {})
-        user = pi.get("id") or pi.get("email") or entry.unique_id or entry.title
-        device_info = {
-            "identifiers": {(DOMAIN, str(user))},
-            "manufacturer": "Oura",
-            "name": entry.title or "Oura Account",
-            "configuration_url": "https://cloud.ouraring.com/",
-        }
-    except Exception:
-        device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "manufacturer": "Oura",
-            "name": entry.title or "Oura Account",
-            "configuration_url": "https://cloud.ouraring.com/",
-        }
-
-    options = entry.options or {}
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "coordinator": coordinator,
-        "client": client,
-        "device_info": device_info,
-        "options": options,
-    }
-
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    # YAML import is handled in config_flow via application_credentials import, if present.
     return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    # Store a shared dict per entry
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = {}
+
+    # Set up platforms
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    return True
+
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok and entry.entry_id in hass.data.get(DOMAIN, {}):
-        hass.data[DOMAIN].pop(entry.entry_id)
+    if unload_ok:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
     return unload_ok

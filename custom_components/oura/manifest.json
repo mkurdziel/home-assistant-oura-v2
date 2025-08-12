@@ -1,20 +1,16 @@
 {
   "domain": "oura",
-  "name": "Oura Ring (HACS)",
-  "version": "0.3.2",
-  "documentation": "https://example.com/ha-oura",
-  "issue_tracker": "https://example.com/ha-oura/issues",
+  "name": "Oura Ring",
+  "version": "0.3.3",
+  "documentation": "https://github.com/yourname/ha-oura#readme",
+  "issue_tracker": "https://github.com/yourname/ha-oura/issues",
+  "requirements": [],
+  "dependencies": [
+    "application_credentials"
+  ],
   "codeowners": [
-    "@your-github"
+    "@yourname"
   ],
   "config_flow": true,
-  "dependencies": [
-    "application_credentials",
-    "auth"
-  ],
-  "requirements": [],
-  "iot_class": "cloud_polling",
-  "loggers": [
-    "custom_components.oura"
-  ]
+  "iot_class": "cloud_polling"
 }
