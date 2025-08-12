@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
@@ -9,12 +10,11 @@ from homeassistant.components.application_credentials import (
 from homeassistant.helpers.config_entry_oauth2_flow import (
     AbstractOAuth2Implementation,
 )
-
-# Try PKCE impl if available (HA 2025.3+), else fall back to LocalOAuth2Implementation
 try:
+    # Prefer PKCE when available
     from homeassistant.helpers.config_entry_oauth2_flow import LocalOAuth2ImplementationWithPkce as _LocalImpl
-except Exception:  # older HA
-    from homeassistant.helpers.config_entry_oauth2_flow import LocalOAuth2Implementation as _LocalImpl  # type: ignore
+except Exception:  # older cores
+    from homeassistant.helpers.config_entry_oauth2_flow import LocalOAuth2Implementation as _LocalImpl
 
 from .const import DOMAIN, OAUTH_AUTHORIZE_URL, OAUTH_TOKEN_URL
 
@@ -35,3 +35,10 @@ async def async_get_auth_implementation(
         token_url=OAUTH_TOKEN_URL,
         client_secret=credential.client_secret or "",
     )
+
+async def async_get_description_placeholders(hass: HomeAssistant):
+    # Placeholders rendered in the Application Credentials UI
+    return {
+        "console_url": "https://cloud.ouraring.com",
+        "oauth_redirect_url": "https://my.home-assistant.io/redirect/oauth",
+    }

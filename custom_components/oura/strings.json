@@ -1,18 +1,11 @@
 {
   "title": "Oura Ring",
   "config": {
-    "step": {
-      "user": {
-        "title": "Link your Oura account",
-        "description": "Authenticate with Oura to authorize Home Assistant. You will be redirected to Oura to grant access."
-      },
-      "reauth_confirm": {
-        "title": "Reauthenticate Oura",
-        "description": "Your Oura credentials need to be refreshed. Continue to sign in again."
-      }
-    },
     "abort": {
       "already_configured": "This Oura account is already configured."
     }
+  },
+  "application_credentials": {
+    "description": "Create an OAuth2 app in the [Oura developer console]({console_url}). Set the redirect URI to https://my.home-assistant.io/redirect/oauth"
   }
 }
