@@ -1,5 +1,5 @@
 {
-  "name": "Oura Ring (HACS)",
+  "name": "Oura Ring (V2)",
   "render_readme": true,
   "domains": [
     "sensor"
