@@ -25,19 +25,8 @@ def _today_dates():
     return yesterday.isoformat(), today.isoformat(), now
 
 class OuraDataUpdateCoordinator(DataUpdateCoordinator[OuraData]):
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        client: OuraApiClient,
-        update_interval: timedelta,
-        title: str,
-    ) -> None:
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=title,
-            update_interval=update_interval,
-        )
+    def __init__(self, hass: HomeAssistant, client: OuraApiClient, update_interval: timedelta, title: str) -> None:
+        super().__init__(hass, _LOGGER, name=title, update_interval=update_interval)
         self._client = client
 
     async def _async_update_data(self) -> OuraData:
@@ -45,7 +34,7 @@ class OuraDataUpdateCoordinator(DataUpdateCoordinator[OuraData]):
         start_dt = f"{start_date}T00:00:00{now.strftime('%z')}"
         end_dt = now.isoformat(timespec="seconds")
 
-        async def _fetch_safely(coro, key: str) -> Optional[Dict[str, Any]]:
+        async def _fetch_safely(coro, key: str):
             try:
                 return await coro
             except OuraApiError as err:

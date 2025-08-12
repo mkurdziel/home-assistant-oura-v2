@@ -4,11 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
-from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass, SensorEntityDescription
-from homeassistant.const import PERCENTAGE, UnitOfTime
+from homeassistant.components.sensor import SensorEntity, SensorStateClass, SensorEntityDescription
+from homeassistant.const import PERCENTAGE
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CONF_ENABLE_PACK_SLEEP, CONF_ENABLE_PACK_READINESS, CONF_ENABLE_PACK_ACTIVITY, CONF_ENABLE_PACK_VITALS
+from .const import DOMAIN, CONF_ENABLE_WORKOUT_SUMMARY, CONF_ENABLE_SESSION_SUMMARY
 from .coordinator import OuraDataUpdateCoordinator, OuraData
 
 def _find_first(data: dict, path: list[str], default=None):
@@ -20,50 +20,115 @@ def _find_first(data: dict, path: list[str], default=None):
     return cur
 
 def _first_item(lst):
-    if isinstance(lst, tuple):
-        lst = list(lst)
     if isinstance(lst, list) and lst:
         return lst[0]
     return None
 
-def _latest_daily(data: OuraData, key: str) -> dict:
-    return _first_item((data.payloads.get(key, {}) or {}).get("data", [])) or {}
+# ---- Extra helpers for per-metric sensors ----
+from datetime import datetime, timezone, timedelta
 
-def _latest_sleep_record(data: OuraData) -> dict:
-    return _first_item((data.payloads.get("sleep", {}) or {}).get("data", [])) or {}
-
-def _to_minutes(value):
+def _sec_to_min(val):
     try:
-        if value is None:
-            return None
-        v = float(value)
-        return round(v / 60) if v > 600 else round(v)
+        return round(float(val) / 60.0, 2) if val is not None else None
     except Exception:
         return None
 
-def _km_from_m(value):
+def _m_to_km(val):
     try:
-        if value is None:
-            return None
-        v = float(value)
-        return round(v / 1000, 3) if v > 100 else round(v, 3)
+        return round(float(val) / 1000.0, 3) if val is not None else None
     except Exception:
         return None
+
+def _pick_main_sleep(sleep_items: list | None) -> dict | None:
+    """Choose the 'main' sleep from a list: prefer type 'long_sleep' or max total_sleep_duration."""
+    if not isinstance(sleep_items, list) or not sleep_items:
+        return None
+    best = None
+    best_score = -1
+    for it in sleep_items:
+        if not isinstance(it, dict):
+            continue
+        dur = it.get("total_sleep_duration") or 0
+        typ = it.get("type") or ""
+        score = (2 if typ == "long_sleep" else 1 if typ == "sleep" else 0) * 10_000 + int(dur or 0)
+        if score > best_score:
+            best_score = score
+            best = it
+    return best
+
+# ---- Workouts & Sessions helpers ----
+from datetime import datetime
+
+def _items_from_payload(data: OuraData, key: str) -> list[dict]:
+    payload = data.payloads.get(key, {}) if data and data.payloads else {}
+    arr = payload.get("data", [])
+    return arr if isinstance(arr, list) else []
+
+def _parse_iso(dt: str) -> datetime | None:
+    if not isinstance(dt, str):
+        return None
+    try:
+        if dt.endswith("Z"):
+            dt = dt[:-1] + "+00:00"
+        return datetime.fromisoformat(dt)
+    except Exception:
+        return None
+
+def _duration_minutes(item: dict) -> float | None:
+    for k in ("duration", "duration_seconds", "duration_min", "duration_minutes"):
+        if k in item and isinstance(item[k], (int, float)):
+            if "min" in k:
+                return float(item[k])
+            return float(item[k]) / 60.0
+    sd = _parse_iso(item.get("start_datetime"))
+    ed = _parse_iso(item.get("end_datetime"))
+    if sd and ed:
+        return max((ed - sd).total_seconds() / 60.0, 0.0)
+    return None
+
+def _sum_calories(items: list[dict]) -> float | None:
+    total = 0.0
+    found = False
+    for it in items:
+        for k in ("calories", "total_calories", "kcal", "energy_burned_kcal"):
+            if k in it and isinstance(it[k], (int, float)):
+                total += float(it[k])
+                found = True
+                break
+    return total if found else None
+
+def _sum_duration_minutes(items: list[dict]) -> float | None:
+    mins = 0.0
+    found = False
+    for it in items:
+        dm = _duration_minutes(it)
+        if isinstance(dm, (int, float)):
+            mins += float(dm)
+            found = True
+    return mins if found else None
+
+def _last_by_start(items: list[dict]) -> dict | None:
+    if not items:
+        return None
+    try:
+        return max(items, key=lambda i: i.get("start_datetime", ""))
+    except Exception:
+        return items[-1]
 
 @dataclass
 class OuraCalculatedSensorDescription(SensorEntityDescription):
     value_fn: Callable[[OuraData], Any] | None = None
     attr_fn: Callable[[OuraData], Dict[str, Any]] | None = None
+    group: str | None = None
 
-# --- Base sensors (scores + core metrics) ---
 SENSORS: list[OuraCalculatedSensorDescription] = [
     OuraCalculatedSensorDescription(
         key="readiness_score",
         name="Oura Readiness Score",
         icon="mdi:arm-flex",
         native_unit_of_measurement=PERCENTAGE,
-        value_fn=lambda d: _find_first(_latest_daily(d, "daily_readiness"), ["score"]),
-        attr_fn=lambda d: _latest_daily(d, "daily_readiness").get("contributors", {}),
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_readiness", {}).get("data", [])) or {}, ["score"]),
+        attr_fn=lambda d: (_first_item(d.payloads.get("daily_readiness", {}).get("data", [])) or {}).get("contributors", {}),
         state_class=SensorStateClass.MEASUREMENT,
     ),
     OuraCalculatedSensorDescription(
@@ -71,8 +136,8 @@ SENSORS: list[OuraCalculatedSensorDescription] = [
         name="Oura Sleep Score",
         icon="mdi:sleep",
         native_unit_of_measurement=PERCENTAGE,
-        value_fn=lambda d: _find_first(_latest_daily(d, "daily_sleep"), ["score"]),
-        attr_fn=lambda d: _latest_daily(d, "daily_sleep").get("contributors", {}),
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_sleep", {}).get("data", [])) or {}, ["score"]),
+        attr_fn=lambda d: (_first_item(d.payloads.get("daily_sleep", {}).get("data", [])) or {}).get("contributors", {}),
         state_class=SensorStateClass.MEASUREMENT,
     ),
     OuraCalculatedSensorDescription(
@@ -80,294 +145,155 @@ SENSORS: list[OuraCalculatedSensorDescription] = [
         name="Oura Activity Score",
         icon="mdi:run",
         native_unit_of_measurement=PERCENTAGE,
-        value_fn=lambda d: _find_first(_latest_daily(d, "daily_activity"), ["score"]),
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["score"]),
         state_class=SensorStateClass.MEASUREMENT,
     ),
     OuraCalculatedSensorDescription(
         key="steps",
         name="Oura Steps",
         icon="mdi:walk",
-        value_fn=lambda d: _find_first(_latest_daily(d, "daily_activity"), ["steps"]),
-        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["steps"]),
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     OuraCalculatedSensorDescription(
         key="total_calories",
         name="Oura Total Calories",
         icon="mdi:fire",
-        value_fn=lambda d: _find_first(_latest_daily(d, "daily_activity"), ["total_calories"]),
-        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["total_calories"]),
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     OuraCalculatedSensorDescription(
         key="spo2_avg",
         name="Oura SpO2 Average",
         icon="mdi:blood-bag",
         native_unit_of_measurement=PERCENTAGE,
-        value_fn=lambda d: _find_first(_latest_daily(d, "daily_spo2"), ["spo2_percentage"]),
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_spo2", {}).get("data", [])) or {}, ["spo2_percentage"]),
         state_class=SensorStateClass.MEASUREMENT,
     ),
     OuraCalculatedSensorDescription(
         key="resting_heart_rate",
         name="Oura Resting Heart Rate",
         icon="mdi:heart",
-        value_fn=lambda d: _find_first(_latest_daily(d, "daily_readiness"), ["contributors","resting_heart_rate"]),
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_readiness", {}).get("data", [])) or {}, ["contributors","resting_heart_rate"]),
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    # HR time-series: latest/min/max for the last window
     OuraCalculatedSensorDescription(
         key="hr_latest",
         name="Oura Heart Rate (Latest)",
         icon="mdi:heart-pulse",
-        value_fn=lambda d: (lambda items: (items[-1] if items and isinstance(items[-1], (int, float)) else (items[-1].get("bpm") if items and isinstance(items[-1], dict) else None)))(_latest_daily(d, "heartrate").get("items") if isinstance(_latest_daily(d, "heartrate"), dict) else None),
+        value_fn=lambda d: (
+            (lambda items: (items[-1] if items and isinstance(items[-1], (int, float)) else (items[-1].get("bpm") if items and isinstance(items[-1], dict) else None)))
+            (((_first_item(d.payloads.get("heartrate", {}).get("data", [])) or {}).get("items")))
+        ),
         state_class=SensorStateClass.MEASUREMENT,
     ),
     OuraCalculatedSensorDescription(
         key="hr_min",
         name="Oura Heart Rate (Min)",
         icon="mdi:heart-outline",
-        value_fn=lambda d: (lambda items: min(([i for i in items if isinstance(i, (int, float))] or [i.get("bpm") for i in items if isinstance(i, dict) and "bpm" in i]), default=None))(_latest_daily(d, "heartrate").get("items") if isinstance(_latest_daily(d, "heartrate"), dict) else None),
+        value_fn=lambda d: (
+            (lambda items: min(([i for i in items if isinstance(i, (int, float))] or [i.get("bpm") for i in items if isinstance(i, dict) and "bpm" in i]), default=None))
+            (((_first_item(d.payloads.get("heartrate", {}).get("data", [])) or {}).get("items")))
+        ),
         state_class=SensorStateClass.MEASUREMENT,
     ),
     OuraCalculatedSensorDescription(
         key="hr_max",
         name="Oura Heart Rate (Max)",
         icon="mdi:heart-off",
-        value_fn=lambda d: (lambda items: max(([i for i in items if isinstance(i, (int, float))] or [i.get("bpm") for i in items if isinstance(i, dict) and "bpm" in i]), default=None))(_latest_daily(d, "heartrate").get("items") if isinstance(_latest_daily(d, "heartrate"), dict) else None),
+        value_fn=lambda d: (
+            (lambda items: max(([i for i in items if isinstance(i, (int, float))] or [i.get("bpm") for i in items if isinstance(i, dict) and "bpm" in i]), default=None))
+            (((_first_item(d.payloads.get("heartrate", {}).get("data", [])) or {}).get("items")))
+        ),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+
+    # ---- Workout summary sensors ----
+    OuraCalculatedSensorDescription(
+        key="workouts_today_count",
+        name="Oura Workouts (Today)",
+        icon="mdi:run-fast",
+        value_fn=lambda d: len(_items_from_payload(d, "workout")),
+        group="workout",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="workouts_today_calories",
+        name="Oura Workouts Calories (Today)",
+        icon="mdi:fire",
+        value_fn=lambda d: _sum_calories(_items_from_payload(d, "workout")),
+        group="workout",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="kcal",
+    ),
+    OuraCalculatedSensorDescription(
+        key="workout_last_type",
+        name="Oura Last Workout Type",
+        icon="mdi:weight-lifter",
+        value_fn=lambda d: (_last_by_start(_items_from_payload(d, "workout")) or {}).get("type"),
+        group="workout",
+    ),
+    OuraCalculatedSensorDescription(
+        key="workout_last_duration_min",
+        name="Oura Last Workout Duration",
+        icon="mdi:timer-outline",
+        value_fn=lambda d: _duration_minutes(_last_by_start(_items_from_payload(d, "workout")) or {}) if _last_by_start(_items_from_payload(d, "workout")) else None,
+        group="workout",
+        native_unit_of_measurement="min",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+
+    # ---- Session summary sensors ----
+    OuraCalculatedSensorDescription(
+        key="sessions_today_count",
+        name="Oura Sessions (Today)",
+        icon="mdi:meditation",
+        value_fn=lambda d: len(_items_from_payload(d, "session")),
+        group="session",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="sessions_total_duration_min",
+        name="Oura Sessions Duration (Today)",
+        icon="mdi:timer-sand",
+        value_fn=lambda d: _sum_duration_minutes(_items_from_payload(d, "session")),
+        group="session",
+        native_unit_of_measurement="min",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="session_last_type",
+        name="Oura Last Session Type",
+        icon="mdi:head-cog-outline",
+        value_fn=lambda d: (_last_by_start(_items_from_payload(d, "session")) or {}).get("type"),
+        group="session",
+    ),
+    OuraCalculatedSensorDescription(
+        key="session_last_duration_min",
+        name="Oura Last Session Duration",
+        icon="mdi:timer-outline",
+        value_fn=lambda d: _duration_minutes(_last_by_start(_items_from_payload(d, "session")) or {}) if _last_by_start(_items_from_payload(d, "session")) else None,
+        group="session",
+        native_unit_of_measurement="min",
         state_class=SensorStateClass.MEASUREMENT,
     ),
 ]
 
-# --- Packs ---
-def _pack_sleep() -> list[OuraCalculatedSensorDescription]:
-    return [
-        OuraCalculatedSensorDescription(
-            key="sleep_total_duration_min",
-            name="Oura Sleep Total Duration",
-            icon="mdi:sleep",
-            native_unit_of_measurement=UnitOfTime.MINUTES,
-            value_fn=lambda d: _to_minutes(_find_first(_latest_daily(d, "daily_sleep"), ["total_sleep_duration"]) or _find_first(_latest_sleep_record(d), ["duration"])),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="sleep_deep_duration_min",
-            name="Oura Sleep Deep Duration",
-            icon="mdi:sleep",
-            native_unit_of_measurement=UnitOfTime.MINUTES,
-            value_fn=lambda d: _to_minutes(_find_first(_latest_daily(d, "daily_sleep"), ["deep_sleep_duration"])),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="sleep_rem_duration_min",
-            name="Oura Sleep REM Duration",
-            icon="mdi:sleep",
-            native_unit_of_measurement=UnitOfTime.MINUTES,
-            value_fn=lambda d: _to_minutes(_find_first(_latest_daily(d, "daily_sleep"), ["rem_sleep_duration"])),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="sleep_light_duration_min",
-            name="Oura Sleep Light Duration",
-            icon="mdi:sleep",
-            native_unit_of_measurement=UnitOfTime.MINUTES,
-            value_fn=lambda d: _to_minutes(_find_first(_latest_daily(d, "daily_sleep"), ["light_sleep_duration"])),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="sleep_efficiency",
-            name="Oura Sleep Efficiency",
-            icon="mdi:sleep",
-            native_unit_of_measurement=PERCENTAGE,
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_sleep"), ["efficiency"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="sleep_latency_min",
-            name="Oura Sleep Latency",
-            icon="mdi:timer-sand",
-            native_unit_of_measurement=UnitOfTime.MINUTES,
-            value_fn=lambda d: _to_minutes(_find_first(_latest_daily(d, "daily_sleep"), ["latency"])),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="sleep_bedtime_start",
-            name="Oura Bedtime Start",
-            icon="mdi:clock-start",
-            device_class=SensorDeviceClass.TIMESTAMP,
-            value_fn=lambda d: _find_first(_latest_sleep_record(d), ["bedtime_start"]),
-        ),
-        OuraCalculatedSensorDescription(
-            key="sleep_bedtime_end",
-            name="Oura Bedtime End",
-            icon="mdi:clock-end",
-            device_class=SensorDeviceClass.TIMESTAMP,
-            value_fn=lambda d: _find_first(_latest_sleep_record(d), ["bedtime_end"]),
-        ),
-    ]
-
-def _pack_readiness() -> list[OuraCalculatedSensorDescription]:
-    return [
-        OuraCalculatedSensorDescription(
-            key="readiness_hrv_balance",
-            name="Oura Readiness HRV Balance",
-            icon="mdi:heart-flash",
-            native_unit_of_measurement=PERCENTAGE,
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_readiness"), ["contributors","hrv_balance"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="readiness_temperature_deviation_c",
-            name="Oura Temperature Deviation",
-            icon="mdi:thermometer",
-            native_unit_of_measurement="°C",
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_readiness"), ["contributors","temperature_deviation"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="readiness_recovery_index_min",
-            name="Oura Recovery Index",
-            icon="mdi:progress-clock",
-            native_unit_of_measurement=UnitOfTime.MINUTES,
-            value_fn=lambda d: _to_minutes(_find_first(_latest_daily(d, "daily_readiness"), ["contributors","recovery_index"])),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="readiness_sleep_balance",
-            name="Oura Sleep Balance",
-            icon="mdi:sleep",
-            native_unit_of_measurement=PERCENTAGE,
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_readiness"), ["contributors","sleep_balance"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="readiness_activity_balance",
-            name="Oura Activity Balance",
-            icon="mdi:run",
-            native_unit_of_measurement=PERCENTAGE,
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_readiness"), ["contributors","activity_balance"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-    ]
-
-def _pack_activity() -> list[OuraCalculatedSensorDescription]:
-    return [
-        OuraCalculatedSensorDescription(
-            key="active_calories",
-            name="Oura Active Calories",
-            icon="mdi:fire",
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_activity"), ["active_calories"]),
-            state_class=SensorStateClass.TOTAL,
-        ),
-        OuraCalculatedSensorDescription(
-            key="equivalent_walking_distance_km",
-            name="Oura Eq. Walking Distance",
-            icon="mdi:map-marker-distance",
-            value_fn=lambda d: _km_from_m(_find_first(_latest_daily(d, "daily_activity"), ["equivalent_walking_distance"])),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="inactive_time_min",
-            name="Oura Inactive Time",
-            icon="mdi:seat-recline-normal",
-            native_unit_of_measurement=UnitOfTime.MINUTES,
-            value_fn=lambda d: _to_minutes(_find_first(_latest_daily(d, "daily_activity"), ["inactivity_time"])),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="non_wear_time_min",
-            name="Oura Non-wear Time",
-            icon="mdi:watch-off",
-            native_unit_of_measurement=UnitOfTime.MINUTES,
-            value_fn=lambda d: _to_minutes(_find_first(_latest_daily(d, "daily_activity"), ["non_wear_time"])),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="activity_meet_daily_targets",
-            name="Oura Activity: Meet Daily Targets",
-            icon="mdi:target",
-            native_unit_of_measurement=PERCENTAGE,
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_activity"), ["contributors","meet_daily_targets"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="activity_move_every_hour",
-            name="Oura Activity: Move Every Hour",
-            icon="mdi:timer-outline",
-            native_unit_of_measurement=PERCENTAGE,
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_activity"), ["contributors","move_every_hour"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="activity_stay_active",
-            name="Oura Activity: Stay Active",
-            icon="mdi:run-fast",
-            native_unit_of_measurement=PERCENTAGE,
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_activity"), ["contributors","stay_active"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="activity_training_frequency",
-            name="Oura Activity: Training Frequency",
-            icon="mdi:calendar-clock",
-            native_unit_of_measurement=PERCENTAGE,
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_activity"), ["contributors","training_frequency"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="activity_training_volume",
-            name="Oura Activity: Training Volume",
-            icon="mdi:dumbbell",
-            native_unit_of_measurement=PERCENTAGE,
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_activity"), ["contributors","training_volume"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="activity_recovery_time",
-            name="Oura Activity: Recovery Time",
-            icon="mdi:heart-plus",
-            native_unit_of_measurement=PERCENTAGE,
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_activity"), ["contributors","recovery_time"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-    ]
-
-def _pack_vitals() -> list[OuraCalculatedSensorDescription]:
-    return [
-        OuraCalculatedSensorDescription(
-            key="respiratory_rate",
-            name="Oura Respiratory Rate",
-            icon="mdi:lungs",
-            value_fn=lambda d: _find_first(_latest_daily(d, "daily_sleep"), ["respiratory_rate"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-        OuraCalculatedSensorDescription(
-            key="hrv_rmssd",
-            name="Oura HRV (RMSSD)",
-            icon="mdi:heart-cog",
-            value_fn=lambda d: _find_first(_latest_sleep_record(d), ["rmssd"]) or _find_first(_latest_daily(d, "daily_sleep"), ["rmssd"]),
-            state_class=SensorStateClass.MEASUREMENT,
-        ),
-    ]
-
-def _build_sensors(options: dict | None) -> list[OuraCalculatedSensorDescription]:
-    base = SENSORS.copy()
-    if not options:
-        return base + _pack_sleep() + _pack_readiness() + _pack_activity() + _pack_vitals()
-    def _opt(name: str, default: bool) -> bool:
-        return bool(options.get(name, default))
-    if _opt(CONF_ENABLE_PACK_SLEEP, True):
-        base += _pack_sleep()
-    if _opt(CONF_ENABLE_PACK_READINESS, True):
-        base += _pack_readiness()
-    if _opt(CONF_ENABLE_PACK_ACTIVITY, True):
-        base += _pack_activity()
-    if _opt(CONF_ENABLE_PACK_VITALS, True):
-        base += _pack_vitals()
-    return base
-
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator: OuraDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     device_info = hass.data[DOMAIN][entry.entry_id]["device_info"]
-    options = hass.data[DOMAIN][entry.entry_id].get("options") or {}
-    descriptions = _build_sensors(options)
+    options = hass.data[DOMAIN][entry.entry_id].get("options", {})
+    enable_workout = options.get(CONF_ENABLE_WORKOUT_SUMMARY, True)
+    enable_session = options.get(CONF_ENABLE_SESSION_SUMMARY, True)
+
+    def _enabled(desc: OuraCalculatedSensorDescription) -> bool:
+        if desc.group == "workout" and not enable_workout:
+            return False
+        if desc.group == "session" and not enable_session:
+            return False
+        return True
+
+    descriptions = [d for d in SENSORS if _enabled(d)]
     entities = [OuraCalculatedSensor(coordinator, desc, device_info) for desc in descriptions]
     async_add_entities(entities)
 
@@ -397,166 +323,391 @@ class OuraCalculatedSensor(CoordinatorEntity[OuraData], SensorEntity):
         return {}
 
 
-# ---- Helpers for workouts & sessions summaries ----
-from datetime import datetime, timezone
-from datetime import datetime
-
-def _iso_parse(dt_str):
-    try:
-        if not dt_str:
-            return None
-        # Normalize 'Z' to '+00:00' for Python's fromisoformat
-        ds = dt_str.replace('Z', '+00:00')
-        return datetime.fromisoformat(ds)
-    except Exception:
-        try:
-            # Some fields may be date-only
-            return datetime.fromisoformat(dt_str)
-        except Exception:
-            return None
-
-def _today_iso():
-    return datetime.now(timezone.utc).astimezone().date().isoformat()
-
-def _filter_by_day(items, day_key="day", day=None):
-    if day is None:
-        day = _today_iso()
-    if not isinstance(items, list):
-        return []
-    return [i for i in items if isinstance(i, dict) and i.get(day_key) == day]
-
-def _duration_minutes(start_str, end_str):
-    sd = _iso_parse(start_str)
-    ed = _iso_parse(end_str)
-    if sd and ed:
-        return max(0, (ed - sd).total_seconds() / 60.0)
-    return None
-
-def _sum_duration_minutes(items, start_key="start_datetime", end_key="end_datetime"):
-    total = 0.0
-    any_val = False
-    for i in items:
-        if not isinstance(i, dict):
-            continue
-        mins = _duration_minutes(i.get(start_key), i.get(end_key))
-        if mins is not None:
-            total += mins
-            any_val = True
-    return (total if any_val else None)
-
-def _last_by_time(items, start_key="start_datetime"):
-    # Return most recent by start time
-    best = None
-    best_ts = None
-    for i in items or []:
-        if not isinstance(i, dict):
-            continue
-        ts = _iso_parse(i.get(start_key)) or _iso_parse(i.get("timestamp") or "")
-        if ts and (best_ts is None or ts > best_ts):
-            best, best_ts = i, ts
-    return best
-
-# ---- Append Workout & Session summary sensors ----
+# ---- Sleep details (from /usercollection/sleep main period) ----
 SENSORS.extend([
-    # Workouts: count today
     OuraCalculatedSensorDescription(
-        key="workouts_today_count",
-        name="Oura Workouts Today",
-        icon="mdi:arm-flex",
-        value_fn=lambda d: (
-            (lambda arr: len(_filter_by_day(arr))) ( (d.payloads.get("workout", {}) or {}).get("data") )
-        ),
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    # Workouts: total duration today (minutes)
-    OuraCalculatedSensorDescription(
-        key="workouts_today_duration_min",
-        name="Oura Workouts Duration Today",
-        icon="mdi:timer",
+        key="sleep_total_duration_min",
+        name="Oura Sleep Total Duration",
+        icon="mdi:sleep",
         native_unit_of_measurement="min",
         value_fn=lambda d: (
-            (lambda arr: _sum_duration_minutes(_filter_by_day(arr))) ( (d.payloads.get("workout", {}) or {}).get("data") )
+            _sec_to_min((_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("total_sleep_duration"))
         ),
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    # Workouts: total calories today
     OuraCalculatedSensorDescription(
-        key="workouts_today_calories",
-        name="Oura Workouts Calories Today",
-        icon="mdi:fire",
-        value_fn=lambda d: (
-            (lambda arr: (sum((i.get("calories", 0) for i in _filter_by_day(arr) if isinstance(i, dict)), 0) if isinstance(arr, list) else None))
-            ( (d.payloads.get("workout", {}) or {}).get("data") )
-        ),
-        state_class=SensorStateClass.TOTAL,
-    ),
-    # Last workout summary
-    OuraCalculatedSensorDescription(
-        key="last_workout",
-        name="Oura Last Workout",
-        icon="mdi:run",
-        value_fn=lambda d: (
-            (lambda arr: (_last_by_time(arr) or {}).get("activity"))
-            ( (d.payloads.get("workout", {}) or {}).get("data") )
-        ),
-        attr_fn=lambda d: (
-            (lambda w: ({
-                "activity": w.get("activity"),
-                "label": w.get("label"),
-                "intensity": w.get("intensity"),
-                "calories": w.get("calories"),
-                "distance": w.get("distance"),
-                "source": w.get("source"),
-                "start": w.get("start_datetime"),
-                "end": w.get("end_datetime"),
-                "duration_min": _duration_minutes(w.get("start_datetime"), w.get("end_datetime")),
-                "day": w.get("day"),
-                "id": w.get("id"),
-            } if isinstance(w, dict) else {}))
-            (_last_by_time( (d.payloads.get("workout", {}) or {}).get("data") ))
-        ),
-    ),
-    # Sessions: count today
-    OuraCalculatedSensorDescription(
-        key="sessions_today_count",
-        name="Oura Sessions Today",
-        icon="mdi:meditation",
-        value_fn=lambda d: (
-            (lambda arr: len(_filter_by_day(arr))) ( (d.payloads.get("session", {}) or {}).get("data") )
-        ),
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    # Sessions: total duration today (minutes)
-    OuraCalculatedSensorDescription(
-        key="sessions_today_duration_min",
-        name="Oura Sessions Duration Today",
-        icon="mdi:timer-outline",
+        key="sleep_time_in_bed_min",
+        name="Oura Sleep Time In Bed",
+        icon="mdi:bed",
         native_unit_of_measurement="min",
         value_fn=lambda d: (
-            (lambda arr: _sum_duration_minutes(_filter_by_day(arr))) ( (d.payloads.get("session", {}) or {}).get("data") )
+            _sec_to_min((_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("time_in_bed"))
         ),
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    # Last session summary
     OuraCalculatedSensorDescription(
-        key="last_session",
-        name="Oura Last Session",
-        icon="mdi:meditation",
+        key="sleep_latency_min",
+        name="Oura Sleep Latency",
+        icon="mdi:timer-sand",
+        native_unit_of_measurement="min",
         value_fn=lambda d: (
-            (lambda arr: (_last_by_time(arr) or {}).get("type"))
-            ( (d.payloads.get("session", {}) or {}).get("data") )
+            _sec_to_min((_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("latency"))
         ),
-        attr_fn=lambda d: (
-            (lambda s: ({
-                "type": s.get("type"),
-                "mood": s.get("mood"),
-                "start": s.get("start_datetime"),
-                "end": s.get("end_datetime"),
-                "duration_min": _duration_minutes(s.get("start_datetime"), s.get("end_datetime")),
-                "day": s.get("day"),
-                "id": s.get("id"),
-            } if isinstance(s, dict) else {}))
-            (_last_by_time( (d.payloads.get("session", {}) or {}).get("data") ))
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="sleep_efficiency",
+        name="Oura Sleep Efficiency",
+        icon="mdi:gauge",
+        native_unit_of_measurement=PERCENTAGE,
+        value_fn=lambda d: (
+            (_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("efficiency")
         ),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="sleep_deep_duration_min",
+        name="Oura Sleep Deep Duration",
+        icon="mdi:weather-night",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: (
+            _sec_to_min((_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("deep_sleep_duration"))
+        ),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="sleep_rem_duration_min",
+        name="Oura Sleep REM Duration",
+        icon="mdi:brain",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: (
+            _sec_to_min((_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("rem_sleep_duration"))
+        ),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="sleep_light_duration_min",
+        name="Oura Sleep Light Duration",
+        icon="mdi:weather-sunny",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: (
+            _sec_to_min((_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("light_sleep_duration"))
+        ),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="sleep_awake_time_min",
+        name="Oura Sleep Awake Time",
+        icon="mdi:bell-sleep-outline",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: (
+            _sec_to_min((_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("awake_time"))
+        ),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="sleep_avg_hr",
+        name="Oura Sleep Avg HR",
+        icon="mdi:heart",
+        value_fn=lambda d: (
+            (_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("average_heart_rate")
+        ),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="sleep_lowest_hr",
+        name="Oura Sleep Lowest HR",
+        icon="mdi:heart-outline",
+        value_fn=lambda d: (
+            (_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("lowest_heart_rate")
+        ),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="sleep_avg_hrv_ms",
+        name="Oura Sleep Avg HRV (RMSSD)",
+        icon="mdi:waveform",
+        native_unit_of_measurement="ms",
+        value_fn=lambda d: (
+            (_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("average_hrv")
+        ),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="respiratory_rate",
+        name="Oura Respiratory Rate",
+        icon="mdi:lungs",
+        native_unit_of_measurement="breaths/min",
+        value_fn=lambda d: (
+            (lambda brps: round(brps * 60.0, 2) if isinstance(brps, (int, float)) else None)
+            ( (_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("average_breath") )
+        ),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="sleep_restless_periods",
+        name="Oura Sleep Restless Periods",
+        icon="mdi:sleep-off",
+        value_fn=lambda d: (
+            (_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("restless_periods")
+        ),
+        state_class=SensorStateClass.MEASUREMENT,
     ),
 ])
+
+# ---- Sleep timestamps (TIMESTAMP device class) ----
+SENSORS.extend([
+    OuraCalculatedSensorDescription(
+        key="bedtime_start",
+        name="Oura Bedtime Start",
+        icon="mdi:clock-start",
+        value_fn=lambda d: (
+            (_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("bedtime_start")
+        ),
+        device_class=SensorDeviceClass.TIMESTAMP,
+    ),
+    OuraCalculatedSensorDescription(
+        key="bedtime_end",
+        name="Oura Bedtime End",
+        icon="mdi:clock-end",
+        value_fn=lambda d: (
+            (_pick_main_sleep((d.payloads.get("sleep", {}) or {}).get("data")) or {}).get("bedtime_end")
+        ),
+        device_class=SensorDeviceClass.TIMESTAMP,
+    ),
+])
+
+# ---- Readiness contributors & temperature deviations ----
+SENSORS.extend([
+    OuraCalculatedSensorDescription(
+        key="temperature_deviation_c",
+        name="Oura Temperature Deviation",
+        icon="mdi:thermometer",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_readiness", {}).get("data", [])) or {}, ["temperature_deviation"]),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="temperature_trend_deviation_c",
+        name="Oura Temperature Trend Deviation",
+        icon="mdi:thermometer-lines",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_readiness", {}).get("data", [])) or {}, ["temperature_trend_deviation"]),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+])
+
+# Map of readiness contributor keys -> (friendly name, icon)
+_readiness_contrib_map = {
+    "activity_balance": ("Oura Readiness Activity Balance", "mdi:run"),
+    "body_temperature": ("Oura Readiness Body Temperature", "mdi:thermometer"),
+    "hrv_balance": ("Oura Readiness HRV Balance", "mdi:heart-pulse"),
+    "previous_day_activity": ("Oura Readiness Previous Day Activity", "mdi:history"),
+    "previous_night": ("Oura Readiness Previous Night", "mdi:sleep"),
+    "recovery_index": ("Oura Readiness Recovery Index", "mdi:battery-heart-variant"),
+    "resting_heart_rate": ("Oura Readiness Resting HR (Score)", "mdi:heart"),
+    "sleep_balance": ("Oura Readiness Sleep Balance", "mdi:sleep"),
+}
+for key, (nm, ic) in _readiness_contrib_map.items():
+    SENSORS.append(
+        OuraCalculatedSensorDescription(
+            key=f"readiness_{key}",
+            name=nm,
+            icon=ic,
+            native_unit_of_measurement=PERCENTAGE,
+            value_fn=lambda d, k=key: (
+                _find_first(_first_item(d.payloads.get("daily_readiness", {}).get("data", [])) or {}, ["contributors", k])
+            ),
+            state_class=SensorStateClass.MEASUREMENT,
+        )
+    )
+
+# ---- Sleep contributors (scores 1-100) ----
+_sleep_contrib_map = {
+    "deep_sleep": ("Oura Sleep Contributor: Deep", "mdi:weather-night"),
+    "efficiency": ("Oura Sleep Contributor: Efficiency", "mdi:gauge"),
+    "latency": ("Oura Sleep Contributor: Latency", "mdi:timer-sand"),
+    "rem_sleep": ("Oura Sleep Contributor: REM", "mdi:brain"),
+    "restfulness": ("Oura Sleep Contributor: Restfulness", "mdi:sleep"),
+    "timing": ("Oura Sleep Contributor: Timing", "mdi:clock-outline"),
+    "total_sleep": ("Oura Sleep Contributor: Total Sleep", "mdi:sleep"),
+}
+for key, (nm, ic) in _sleep_contrib_map.items():
+    SENSORS.append(
+        OuraCalculatedSensorDescription(
+            key=f"sleep_contrib_{key}",
+            name=nm,
+            icon=ic,
+            native_unit_of_measurement=PERCENTAGE,
+            value_fn=lambda d, k=key: (
+                _find_first(_first_item(d.payloads.get("daily_sleep", {}).get("data", [])) or {}, ["contributors", k])
+            ),
+            state_class=SensorStateClass.MEASUREMENT,
+        )
+    )
+
+# ---- Activity details (from daily_activity) ----
+SENSORS.extend([
+    OuraCalculatedSensorDescription(
+        key="active_calories",
+        name="Oura Active Calories",
+        icon="mdi:fire",
+        native_unit_of_measurement="kcal",
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["active_calories"]),
+        state_class=SensorStateClass.TOTAL,
+    ),
+    OuraCalculatedSensorDescription(
+        key="equivalent_walking_distance_km",
+        name="Oura Eq. Walking Distance",
+        icon="mdi:walk",
+        native_unit_of_measurement=UnitOfLength.KILOMETERS,
+        value_fn=lambda d: _m_to_km(_find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["equivalent_walking_distance"])),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="inactivity_alerts",
+        name="Oura Inactivity Alerts",
+        icon="mdi:bell",
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["inactivity_alerts"]),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="non_wear_time_min",
+        name="Oura Non-wear Time",
+        icon="mdi:watch-off",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: _sec_to_min(_find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["non_wear_time"])),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="resting_time_min",
+        name="Oura Resting Time",
+        icon="mdi:sleep",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: _sec_to_min(_find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["resting_time"])),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="sedentary_time_min",
+        name="Oura Sedentary Time",
+        icon="mdi:seat-outline",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: _sec_to_min(_find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["sedentary_time"])),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="average_met_minutes",
+        name="Oura Average MET Minutes",
+        icon="mdi:chart-line",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["average_met_minutes"]),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="low_activity_met_minutes",
+        name="Oura Low Activity MET Minutes",
+        icon="mdi:walk",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["low_activity_met_minutes"]),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="medium_activity_met_minutes",
+        name="Oura Medium Activity MET Minutes",
+        icon="mdi:run",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["medium_activity_met_minutes"]),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="high_activity_met_minutes",
+        name="Oura High Activity MET Minutes",
+        icon="mdi:run-fast",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["high_activity_met_minutes"]),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="low_activity_time_min",
+        name="Oura Low Activity Time",
+        icon="mdi:walk",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: _sec_to_min(_find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["low_activity_time"])),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="medium_activity_time_min",
+        name="Oura Medium Activity Time",
+        icon="mdi:run",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: _sec_to_min(_find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["medium_activity_time"])),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="high_activity_time_min",
+        name="Oura High Activity Time",
+        icon="mdi:run-fast",
+        native_unit_of_measurement="min",
+        value_fn=lambda d: _sec_to_min(_find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["high_activity_time"])),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    OuraCalculatedSensorDescription(
+        key="target_calories",
+        name="Oura Target Calories",
+        icon="mdi:target",
+        native_unit_of_measurement="kcal",
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["target_calories"]),
+    ),
+    OuraCalculatedSensorDescription(
+        key="target_meters",
+        name="Oura Target Distance",
+        icon="mdi:map-marker-distance",
+        native_unit_of_measurement="m",
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["target_meters"]),
+    ),
+    OuraCalculatedSensorDescription(
+        key="meters_to_target",
+        name="Oura Meters to Target",
+        icon="mdi:map-marker-distance",
+        native_unit_of_measurement="m",
+        value_fn=lambda d: _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["meters_to_target"]),
+    ),
+])
+
+# ---- Activity contributors (scores 1-100) ----
+_activity_contrib_map = {
+    "meet_daily_targets": ("Oura Activity: Meet Daily Targets", "mdi:target-account"),
+    "move_every_hour": ("Oura Activity: Move Every Hour", "mdi:run-fast"),
+    "recovery_time": ("Oura Activity: Recovery Time", "mdi:bed-clock"),
+    "stay_active": ("Oura Activity: Stay Active", "mdi:walk"),
+    "training_frequency": ("Oura Activity: Training Frequency", "mdi:calendar-clock"),
+    "training_volume": ("Oura Activity: Training Volume", "mdi:weight-lifter"),
+}
+for key, (nm, ic) in _activity_contrib_map.items():
+    SENSORS.append(
+        OuraCalculatedSensorDescription(
+            key=f"activity_contrib_{key}",
+            name=nm,
+            icon=ic,
+            native_unit_of_measurement=PERCENTAGE,
+            value_fn=lambda d, k=key: (
+                _find_first(_first_item(d.payloads.get("daily_activity", {}).get("data", [])) or {}, ["contributors", k])
+            ),
+            state_class=SensorStateClass.MEASUREMENT,
+        )
+    )
+
+# ---- SpO2 (make sure we read nested .spo2_percentage.average if present) ----
+SENSORS.append(
+    OuraCalculatedSensorDescription(
+        key="spo2_avg_nightly",
+        name="Oura SpO2 Average (Night)",
+        icon="mdi:blood-bag",
+        native_unit_of_measurement=PERCENTAGE,
+        value_fn=lambda d: (
+            (lambda obj: (obj.get("average") if isinstance(obj, dict) else obj))
+            (_find_first(_first_item(d.payloads.get("daily_spo2", {}).get("data", [])) or {}, ["spo2_percentage"]))
+        ),
+        state_class=SensorStateClass.MEASUREMENT,
+    )
+)

@@ -8,7 +8,7 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import config_entry_oauth2_flow
 
-from .const import DOMAIN, OAUTH_SCOPES_DEFAULT, CONF_USE_SANDBOX, CONF_ADDITIONAL_SCOPES, CONF_UPDATE_INTERVAL,    CONF_ENABLE_PACK_SLEEP, CONF_ENABLE_PACK_READINESS, CONF_ENABLE_PACK_ACTIVITY, CONF_ENABLE_PACK_VITALS
+from .const import DOMAIN, OAUTH_SCOPES_DEFAULT, CONF_USE_SANDBOX, CONF_ADDITIONAL_SCOPES, CONF_UPDATE_INTERVAL, CONF_ENABLE_WORKOUT_SUMMARY, CONF_ENABLE_SESSION_SUMMARY
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ SCOPES = OAUTH_SCOPES_DEFAULT
 
 class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, domain=DOMAIN):
     VERSION = 1
-    MINOR_VERSION = 2
+    MINOR_VERSION = 1
     reauth_entry = None
 
     @property
@@ -71,9 +71,7 @@ class OuraOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_SCAN_INTERVAL, default=options.get(CONF_SCAN_INTERVAL, 1800)): int,
             vol.Optional(CONF_USE_SANDBOX, default=options.get(CONF_USE_SANDBOX, False)): bool,
             vol.Optional(CONF_ADDITIONAL_SCOPES, default=" ".join(options.get(CONF_ADDITIONAL_SCOPES, []))): str,
-            vol.Optional(CONF_ENABLE_PACK_SLEEP, default=options.get(CONF_ENABLE_PACK_SLEEP, True)): bool,
-            vol.Optional(CONF_ENABLE_PACK_READINESS, default=options.get(CONF_ENABLE_PACK_READINESS, True)): bool,
-            vol.Optional(CONF_ENABLE_PACK_ACTIVITY, default=options.get(CONF_ENABLE_PACK_ACTIVITY, True)): bool,
-            vol.Optional(CONF_ENABLE_PACK_VITALS, default=options.get(CONF_ENABLE_PACK_VITALS, True)): bool,
+            vol.Optional(CONF_ENABLE_WORKOUT_SUMMARY, default=options.get(CONF_ENABLE_WORKOUT_SUMMARY, True)): bool,
+            vol.Optional(CONF_ENABLE_SESSION_SUMMARY, default=options.get(CONF_ENABLE_SESSION_SUMMARY, True)): bool,
         })
         return self.async_show_form(step_id="init", data_schema=schema)

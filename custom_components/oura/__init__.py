@@ -32,7 +32,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await coordinator.async_config_entry_first_refresh()
 
-    # Device info for grouping entities per account
+    # Device info per account
     device_info = None
     try:
         pi = coordinator.data.payloads.get("personal_info", {})
@@ -51,11 +51,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "configuration_url": "https://cloud.ouraring.com/",
         }
 
+    options = entry.options or {}
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
         "client": client,
         "device_info": device_info,
-        "options": dict(entry.options),
+        "options": options,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

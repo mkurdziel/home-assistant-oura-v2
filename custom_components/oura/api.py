@@ -1,6 +1,5 @@
 
 from __future__ import annotations
-
 from typing import Any, Dict, Optional
 
 from homeassistant.helpers.config_entry_oauth2_flow import OAuth2Session
@@ -11,8 +10,6 @@ class OuraApiError(Exception):
     pass
 
 class OuraApiClient:
-    """Thin async client around Home Assistant's OAuth2Session for Oura API v2."""
-
     def __init__(self, session: OAuth2Session, *, use_sandbox: bool = False) -> None:
         self._session = session
         self._api_base = SANDBOX_API_BASE if use_sandbox else API_BASE
@@ -25,7 +22,6 @@ class OuraApiClient:
             raise OuraApiError(f"GET {url} -> {resp.status}: {text}")
         return await resp.json()
 
-    # ---- Convenience endpoints ----
     async def personal_info(self) -> Dict[str, Any]:
         return await self._get("/usercollection/personal_info")
 

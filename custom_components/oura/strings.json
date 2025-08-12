@@ -1,5 +1,5 @@
 {
-  "title": "Oura Ring V2",
+  "title": "Oura Ring",
   "config": {
     "abort": {
       "already_configured": "This Oura account is already configured."

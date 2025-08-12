@@ -1,7 +1,7 @@
 {
   "domain": "oura",
   "name": "Oura Ring (HACS)",
-  "version": "0.2.0",
+  "version": "0.3.2",
   "documentation": "https://example.com/ha-oura",
   "issue_tracker": "https://example.com/ha-oura/issues",
   "codeowners": [
@@ -9,7 +9,8 @@
   ],
   "config_flow": true,
   "dependencies": [
-    "application_credentials"
+    "application_credentials",
+    "auth"
   ],
   "requirements": [],
   "iot_class": "cloud_polling",
