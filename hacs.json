@@ -1,0 +1,9 @@
+{
+  "name": "Oura Ring (HACS)",
+  "render_readme": true,
+  "domains": [
+    "sensor"
+  ],
+  "country": "ALL",
+  "homeassistant": "2024.9.0"
+}
