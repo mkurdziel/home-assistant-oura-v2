@@ -12,10 +12,9 @@ from .const import DOMAIN as OURA_DOMAIN, OAUTH_SCOPES_DEFAULT
 
 _LOGGER = logging.getLogger(__name__)
 
-class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler):
+class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, domain=OURA_DOMAIN):
     """Config flow to handle Oura OAuth2."""
 
-    # Older HA cores require these as class attributes
     DOMAIN = OURA_DOMAIN
     SCOPES = OAUTH_SCOPES_DEFAULT
 
@@ -28,7 +27,6 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler):
         return _LOGGER
 
     async def async_oauth_create_entry(self, data: dict[str, Any]) -> config_entries.ConfigEntry:
-        """Create the config entry after OAuth finished."""
         implementation = await config_entry_oauth2_flow.async_get_config_entry_implementation(self.hass, data)
         session = config_entry_oauth2_flow.OAuth2Session(self.hass, data, implementation)
 
@@ -43,7 +41,7 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler):
                 title = f"Oura: {email}"
             if uid:
                 unique_id = str(uid).lower()
-        except Exception:  # best-effort; still allow entry
+        except Exception:
             pass
 
         if unique_id:
@@ -53,7 +51,6 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler):
         return self.async_create_entry(title=title, data=data)
 
     async def async_step_reauth(self, user_input: dict[str, Any] | None = None):
-        """Perform reauth upon an API authentication error."""
         self.reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
         return await super().async_step_reauth(user_input)
 
@@ -81,6 +78,6 @@ class OuraOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="init", data_schema=schema)
 
 
-# Backwards-compat name some cores may look for
 class OuraOAuth2FlowHandler(OAuth2FlowHandler):
+    """Backward compatibility alias for some HA cores."""
     pass

@@ -2,43 +2,20 @@
 from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
-from homeassistant.components.application_credentials import (
-    AuthorizationServer,
-    ClientCredential,
-    AuthImplementation,
-)
-from homeassistant.helpers.config_entry_oauth2_flow import (
-    AbstractOAuth2Implementation,
-)
+from homeassistant.components.application_credentials import AuthorizationServer, ClientCredential, AuthImplementation
+from homeassistant.helpers.config_entry_oauth2_flow import AbstractOAuth2Implementation
 try:
-    # Prefer PKCE when available
     from homeassistant.helpers.config_entry_oauth2_flow import LocalOAuth2ImplementationWithPkce as _LocalImpl
-except Exception:  # older cores
+except Exception:
     from homeassistant.helpers.config_entry_oauth2_flow import LocalOAuth2Implementation as _LocalImpl
 
 from .const import DOMAIN, OAUTH_AUTHORIZE_URL, OAUTH_TOKEN_URL
 
 async def async_get_authorization_server(hass: HomeAssistant) -> AuthorizationServer:
-    return AuthorizationServer(
-        authorize_url=OAUTH_AUTHORIZE_URL,
-        token_url=OAUTH_TOKEN_URL,
-    )
+    return AuthorizationServer(authorize_url=OAUTH_AUTHORIZE_URL, token_url=OAUTH_TOKEN_URL)
 
-async def async_get_auth_implementation(
-    hass: HomeAssistant, auth_domain: str, credential: ClientCredential
-) -> AbstractOAuth2Implementation | AuthImplementation:
-    return _LocalImpl(
-        hass,
-        auth_domain,
-        credential.client_id,
-        authorize_url=OAUTH_AUTHORIZE_URL,
-        token_url=OAUTH_TOKEN_URL,
-        client_secret=credential.client_secret or "",
-    )
+async def async_get_auth_implementation(hass: HomeAssistant, auth_domain: str, credential: ClientCredential) -> AbstractOAuth2Implementation | AuthImplementation:
+    return _LocalImpl(hass, auth_domain, credential.client_id, authorize_url=OAUTH_AUTHORIZE_URL, token_url=OAUTH_TOKEN_URL, client_secret=credential.client_secret or "")
 
-async def async_get_description_placeholders(hass: HomeAssistant):
-    # Placeholders rendered in the Application Credentials UI
-    return {
-        "console_url": "https://cloud.ouraring.com",
-        "oauth_redirect_url": "https://my.home-assistant.io/redirect/oauth",
-    }
+async def async_get_description_placeholders(hass):
+    return {"console_url": "https://cloud.ouraring.com"}
