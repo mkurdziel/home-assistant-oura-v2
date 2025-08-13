@@ -12,8 +12,14 @@ SANDBOX_API_BASE = "https://api.ouraring.com/v2/sandbox"
 DEFAULT_UPDATE_INTERVAL_MIN = 30
 
 OAUTH_SCOPES_DEFAULT = [
-    "email","personal","daily","heartrate","workout","tag","session","spo2",
+    "email",
+    "personal",
+    "daily",
+    "heartrate",
+    "workout",
+    "tag",
+    "session",
+    "spo2",
 ]
 
 CONF_USE_SANDBOX = "use_sandbox"
-CONF_ADDITIONAL_SCOPES = "additional_scopes"

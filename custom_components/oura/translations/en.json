@@ -3,15 +3,9 @@
   "config": {
     "abort": {
       "already_configured": "This Oura account is already configured."
-    },
-    "step": {
-      "reauth_confirm": {
-        "title": "Reauthenticate Oura",
-        "description": "The Oura integration needs to re-authenticate your account."
-      }
     }
   },
   "application_credentials": {
-    "description": "Create an OAuth2 app in the [Oura developer console]({console_url}) and enter the credentials below. Set the redirect URI to {oauth_redirect_url}."
+    "description": "Create an OAuth2 app in the [Oura developer console]({console_url}). Set the redirect URI to {oauth_redirect_url}."
   }
 }

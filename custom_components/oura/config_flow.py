@@ -1,6 +1,5 @@
 
 from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -17,7 +16,6 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
 
     DOMAIN = OURA_DOMAIN
     SCOPES = OAUTH_SCOPES_DEFAULT
-
     VERSION = 1
     MINOR_VERSION = 1
     reauth_entry = None
@@ -27,7 +25,8 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
         return _LOGGER
 
     async def async_oauth_create_entry(self, data: dict[str, Any]) -> config_entries.ConfigEntry:
-        implementation = await config_entry_oauth2_flow.async_get_config_entry_implementation(self.hass, data)
+        """Create the config entry after OAuth finished."""
+        implementation = self.flow_impl
         session = config_entry_oauth2_flow.OAuth2Session(self.hass, data, implementation)
 
         title = "Oura Account"
@@ -51,7 +50,7 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
         return self.async_create_entry(title=title, data=data)
 
     async def async_step_reauth(self, user_input: dict[str, Any] | None = None):
-        self.reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        self.reauth_entry = self.hass.config_entries.async_get_entry(self.context.get("entry_id"))
         return await super().async_step_reauth(user_input)
 
     @staticmethod
@@ -79,5 +78,4 @@ class OuraOptionsFlow(config_entries.OptionsFlow):
 
 
 class OuraOAuth2FlowHandler(OAuth2FlowHandler):
-    """Backward compatibility alias for some HA cores."""
     pass

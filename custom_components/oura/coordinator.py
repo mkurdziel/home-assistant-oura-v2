@@ -1,14 +1,15 @@
 
 from __future__ import annotations
-import asyncio, logging
+import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .api import OuraApiClient, OuraApiError
+from .api import OuraApiClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,11 +33,11 @@ class OuraDataUpdateCoordinator(DataUpdateCoordinator[OuraData]):
         start_dt = f"{start_date}T00:00:00{now.strftime('%z')}"
         end_dt = now.isoformat(timespec="seconds")
 
-        async def _fetch(coro, key):
+        async def _fetch(coro, key: str):
             try:
                 return await coro
             except Exception as err:
-                _LOGGER.debug("Skipping %s: %s", key, err)
+                _LOGGER.debug("Fetch %s failed: %s", key, err)
                 return None
 
         results = await asyncio.gather(
@@ -49,14 +50,19 @@ class OuraDataUpdateCoordinator(DataUpdateCoordinator[OuraData]):
             _fetch(self._client.daily_spo2(start_date, end_date), "daily_spo2"),
             _fetch(self._client.daily_stress(start_date, end_date), "daily_stress"),
             _fetch(self._client.daily_resilience(start_date, end_date), "daily_resilience"),
-            _fetch(self._client.daily_cardiovascular_age(start_date, end_date), "daily_cardiovascular_age"),
-            _fetch(self._client.vo2max(start_date, end_date), "vo2max"),
             _fetch(self._client.heartrate(start_dt, end_dt), "heartrate"),
             _fetch(self._client.workout(start_date, end_date), "workout"),
             _fetch(self._client.session(start_date, end_date), "session"),
             _fetch(self._client.sleep(start_date, end_date), "sleep"),
             _fetch(self._client.enhanced_tag(start_date, end_date), "enhanced_tag"),
+            _fetch(self._client.vo2max(start_date, end_date), "vo2max"),
+            _fetch(self._client.daily_cardiovascular_age(start_date, end_date), "daily_cardiovascular_age"),
         )
-        keys = ["personal_info","ring_configuration","rest_mode_period","daily_readiness","daily_sleep","daily_activity","daily_spo2","daily_stress","daily_resilience","daily_cardiovascular_age","vo2max","heartrate","workout","session","sleep","enhanced_tag"]
+        keys = [
+            "personal_info","ring_configuration","rest_mode_period",
+            "daily_readiness","daily_sleep","daily_activity","daily_spo2",
+            "daily_stress","daily_resilience","heartrate","workout","session",
+            "sleep","enhanced_tag","vo2max","daily_cardiovascular_age",
+        ]
         payloads = {k: v for k, v in zip(keys, results) if v is not None}
         return OuraData(payloads=payloads)
