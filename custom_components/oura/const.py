@@ -17,8 +17,8 @@ OAUTH_SCOPES_DEFAULT = [
     "daily",
     "heartrate",
     "workout",
-    "tag",
     "session",
+    "tag",
     "spo2",
 ]
 

@@ -1,5 +1,6 @@
 
 from __future__ import annotations
+
 from typing import Any, Dict, Optional
 
 from homeassistant.helpers.config_entry_oauth2_flow import OAuth2Session

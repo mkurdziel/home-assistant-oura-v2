@@ -1,8 +1,9 @@
 {
-  "name": "Oura Ring (V2)",
+  "name": "Oura V2",
   "render_readme": true,
   "domains": [
-    "sensor"
+    "sensor",
+    "button"
   ],
   "country": "ALL",
   "homeassistant": "2024.9.0"

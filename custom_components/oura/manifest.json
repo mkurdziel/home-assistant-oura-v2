@@ -1,7 +1,7 @@
 {
   "domain": "oura",
-  "name": "Oura Ring (HACS)",
-  "version": "0.3.7",
+  "name": "Oura V2",
+  "version": "1.0.0",
   "documentation": "https://example.com/ha-oura",
   "issue_tracker": "https://example.com/ha-oura/issues",
   "codeowners": [

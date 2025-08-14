@@ -1,5 +1,6 @@
 
 from __future__ import annotations
+
 import logging
 from typing import Any
 
@@ -16,6 +17,7 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
 
     DOMAIN = OURA_DOMAIN
     SCOPES = OAUTH_SCOPES_DEFAULT
+
     VERSION = 1
     MINOR_VERSION = 1
     reauth_entry = None
@@ -29,15 +31,12 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
         implementation = self.flow_impl
         session = config_entry_oauth2_flow.OAuth2Session(self.hass, data, implementation)
 
-        title = "Oura Account"
+        title = "Oura V2"
         unique_id: str | None = None
         try:
             resp = await session.async_request("get", "https://api.ouraring.com/v2/usercollection/personal_info")
             js = await resp.json()
-            email = js.get("email")
-            uid = js.get("id") or email
-            if email:
-                title = f"Oura: {email}"
+            uid = js.get("id") or js.get("email")
             if uid:
                 unique_id = str(uid).lower()
         except Exception:
@@ -50,14 +49,13 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
         return self.async_create_entry(title=title, data=data)
 
     async def async_step_reauth(self, user_input: dict[str, Any] | None = None):
-        self.reauth_entry = self.hass.config_entries.async_get_entry(self.context.get("entry_id"))
+        self.reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
         return await super().async_step_reauth(user_input)
 
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
         return OuraOptionsFlow(config_entry)
-
 
 class OuraOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, entry: config_entries.ConfigEntry) -> None:
@@ -75,7 +73,6 @@ class OuraOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_SCAN_INTERVAL, default=options.get(CONF_SCAN_INTERVAL, 1800)): int,
         })
         return self.async_show_form(step_id="init", data_schema=schema)
-
 
 class OuraOAuth2FlowHandler(OAuth2FlowHandler):
     pass
