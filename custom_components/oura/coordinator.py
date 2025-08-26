@@ -9,8 +9,9 @@ from typing import Any, Dict
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from .api import OuraApiClient, OuraApiError
+from .api import OuraApiClient, OuraApiError, OuraAuthError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +39,10 @@ class OuraDataUpdateCoordinator(DataUpdateCoordinator[OuraData]):
         async def _fetch_safely(coro, key: str):
             try:
                 return await coro
+            except OuraAuthError as err:
+                _LOGGER.error("Authentication failed for %s: %s", key, err)
+                # Re-raise authentication errors to trigger reauth flow
+                raise ConfigEntryAuthFailed(f"Authentication failed for Oura API: {err}") from err
             except OuraApiError as err:
                 _LOGGER.debug("Endpoint %s unavailable: %s", key, err)
                 return None
@@ -47,7 +52,7 @@ class OuraDataUpdateCoordinator(DataUpdateCoordinator[OuraData]):
 
         (personal_info, ring_configuration, rest_mode_period, daily_readiness, daily_sleep,
          daily_activity, daily_spo2, daily_stress, daily_resilience, heartrate, workout,
-         session, sleep, enhanced_tag, vo2max, daily_cardiovascular_age) = await asyncio.gather(
+         session, sleep, enhanced_tag, vo2max, daily_cardiovascular_age, sleep_time, tag) = await asyncio.gather(
             _fetch_safely(self._client.personal_info(), "personal_info"),
             _fetch_safely(self._client.ring_configuration(), "ring_configuration"),
             _fetch_safely(self._client.rest_mode_period(start_date, end_date), "rest_mode_period"),
@@ -64,6 +69,8 @@ class OuraDataUpdateCoordinator(DataUpdateCoordinator[OuraData]):
             _fetch_safely(self._client.enhanced_tag(start_date, end_date), "enhanced_tag"),
             _fetch_safely(self._client.vo2max(start_date, end_date), "vo2max"),
             _fetch_safely(self._client.daily_cardiovascular_age(start_date, end_date), "daily_cardiovascular_age"),
+            _fetch_safely(self._client.sleep_time(start_date, end_date), "sleep_time"),
+            _fetch_safely(self._client.tag(start_date, end_date), "tag"),
         )
         payloads = {
             k: v for k, v in {
@@ -83,6 +90,8 @@ class OuraDataUpdateCoordinator(DataUpdateCoordinator[OuraData]):
                 "enhanced_tag": enhanced_tag,
                 "vo2max": vo2max,
                 "daily_cardiovascular_age": daily_cardiovascular_age,
+                "sleep_time": sleep_time,
+                "tag": tag,
             }.items() if v is not None
         }
         return OuraData(payloads=payloads)

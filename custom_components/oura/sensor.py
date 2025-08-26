@@ -702,6 +702,47 @@ SENSORS.extend([
     ),
 ])
 
+# Sleep time recommendations and simple tags
+SENSORS.extend([
+    OuraCalculatedSensorDescription(
+        key="optimal_bedtime_start",
+        name="Oura V2 Optimal Bedtime Start",
+        icon="mdi:bed-clock",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda d: _iso_parse(_find_first(_daily_first(d.payloads, "sleep_time"), ["optimal_bedtime","start_offset"])),
+        attr_fn=lambda d: _daily_first(d.payloads, "sleep_time").get("optimal_bedtime", {}),
+    ),
+    OuraCalculatedSensorDescription(
+        key="optimal_bedtime_end",
+        name="Oura V2 Optimal Bedtime End", 
+        icon="mdi:bed-clock-outline",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda d: _iso_parse(_find_first(_daily_first(d.payloads, "sleep_time"), ["optimal_bedtime","end_offset"])),
+    ),
+    OuraCalculatedSensorDescription(
+        key="bedtime_recommendation_status",
+        name="Oura V2 Bedtime Recommendation Status",
+        icon="mdi:check-circle",
+        value_fn=lambda d: _find_first(_daily_first(d.payloads, "sleep_time"), ["status"]),
+    ),
+    OuraCalculatedSensorDescription(
+        key="latest_tag",
+        name="Oura V2 Latest Tag",
+        icon="mdi:tag-text",
+        value_fn=lambda d: (lambda arr: (arr[-1].get("tag") if isinstance(arr, list) and arr and isinstance(arr[-1], dict) else None))((d.payloads.get("tag", {}) or {}).get("data")),
+        attr_fn=lambda d: (
+            (lambda arr: (arr[-1] if isinstance(arr, list) and arr and isinstance(arr[-1], dict) else {}))((d.payloads.get("tag", {}) or {}).get("data"))
+        ),
+    ),
+    OuraCalculatedSensorDescription(
+        key="today_tags_count",
+        name="Oura V2 Tags Today Count",
+        icon="mdi:tag-multiple",
+        value_fn=lambda d: (lambda arr: len(_filter_by_day(arr)))(((d.payloads.get("tag", {}) or {}).get("data"))),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+])
+
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator: OuraDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     device_info = hass.data[DOMAIN][entry.entry_id]["device_info"]

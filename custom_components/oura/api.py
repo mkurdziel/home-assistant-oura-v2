@@ -4,10 +4,15 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from homeassistant.helpers.config_entry_oauth2_flow import OAuth2Session
+from homeassistant.exceptions import ConfigEntryAuthFailed
 
 from .const import API_BASE, SANDBOX_API_BASE
 
 class OuraApiError(Exception):
+    pass
+
+class OuraAuthError(ConfigEntryAuthFailed):
+    """Authentication error that triggers reauth flow."""
     pass
 
 class OuraApiClient:
@@ -20,6 +25,9 @@ class OuraApiClient:
         resp = await self._session.async_request("get", url, params=params)
         if resp.status >= 400:
             text = await resp.text()
+            # Check for authentication/authorization errors that should trigger reauth
+            if resp.status in (401, 403):
+                raise OuraAuthError(f"Authentication failed for {url} -> {resp.status}: {text}")
             raise OuraApiError(f"GET {url} -> {resp.status}: {text}")
         return await resp.json()
 
@@ -70,3 +78,9 @@ class OuraApiClient:
 
     async def daily_cardiovascular_age(self, start_date: str, end_date: str) -> Dict[str, Any]:
         return await self._get("/usercollection/daily_cardiovascular_age", {"start_date": start_date, "end_date": end_date})
+
+    async def sleep_time(self, start_date: str, end_date: str) -> Dict[str, Any]:
+        return await self._get("/usercollection/sleep_time", {"start_date": start_date, "end_date": end_date})
+
+    async def tag(self, start_date: str, end_date: str) -> Dict[str, Any]:
+        return await self._get("/usercollection/tag", {"start_date": start_date, "end_date": end_date})
