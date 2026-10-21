@@ -95,4 +95,4 @@ Reference: [Oura API v2](https://cloud.ouraring.com/v2/docs), [Oura authenticati
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE), restored from the original repository license.
+Licensed under the [MIT License](LICENSE).
