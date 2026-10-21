@@ -47,9 +47,10 @@ async def async_setup(hass: HomeAssistant, config) -> bool:
 def _token_scopes(token):
     scopes = token.get("scope")
     if isinstance(scopes, str):
-        return set(scopes.split())
+        scopes = scopes.split()
     if isinstance(scopes, list):
-        return set(scopes)
+        # Oura token responses namespace grants; authorization requests do not.
+        return {scope.removeprefix("extapi:") for scope in scopes}
     return None  # Older tokens may not report grants; let the API decide.
 
 

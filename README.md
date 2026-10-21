@@ -65,6 +65,8 @@ Download diagnostics from the integration menu to see collection availability, r
 
 Version 1.1.0 fixes SpO₂, VO₂ endpoint naming, bedtime and tag mappings, daily/main-sleep selection, reauthentication, and failure handling. Previously unitless heart-rate and calorie sensors now report `bpm` and `kcal`; existing installations may need to resolve statistics-unit changes through Home Assistant's statistics tools.
 
+Version 1.1.1 also recognizes the `extapi:` permission names returned in Oura OAuth tokens, preserving access for existing accounts without reauthorization.
+
 ## Removal
 
 Remove the integration from **Settings → Devices & services**. Its owned webhook subscriptions are removed when Oura is reachable. Revoke the application's access in Oura if desired, then uninstall the custom integration through HACS or remove its directory and restart Home Assistant.

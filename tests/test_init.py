@@ -64,14 +64,46 @@ def setup_entry(hass):
         yield entry, client
 
 
-async def test_setup_creates_entities_without_outbound_webhooks(hass, setup_entry):
+@pytest.mark.parametrize(
+    "scope",
+    [
+        None,
+        "personal daily heartrate workout session tag spo2",
+        "extapi:personal extapi:daily extapi:heartrate extapi:workout "
+        "extapi:session extapi:tag extapi:spo2",
+        [
+            "extapi:personal",
+            "extapi:daily",
+            "extapi:heartrate",
+            "extapi:workout",
+            "extapi:session",
+            "extapi:tag",
+            "extapi:spo2",
+        ],
+    ],
+)
+async def test_setup_creates_entities_without_outbound_webhooks(hass, setup_entry, scope):
     entry, client = setup_entry
+    if scope is not None:
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, "token": {**entry.data["token"], "scope": scope}}
+        )
     with patch(
         "custom_components.oura.webhooks.OuraWebhooks._request", AsyncMock()
     ) as webhook_request:
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
     webhook_request.assert_not_called()
+    requested = {call.args[0] for call in client.async_get_collection.call_args_list}
+    assert {
+        "daily_sleep",
+        "daily_readiness",
+        "heartrate",
+        "workout",
+        "session",
+        "tag",
+        "daily_spo2",
+    } <= requested
     assert entry.unique_id == "account-1"
     assert entry.data["user_id"] == "account-1"
     assert hass.states.get("sensor.oura_v2_ring_battery").state == "0"
@@ -135,3 +167,22 @@ async def test_options_reload_and_validation(hass, setup_entry):
         assert result["type"] == "create_entry"
         reload.assert_awaited_once_with(entry.entry_id)
     assert entry.options["scan_interval"] == 3600
+
+
+async def test_namespaced_grants_preserve_declined_permissions(hass, setup_entry):
+    entry, client = setup_entry
+    hass.config_entries.async_update_entry(
+        entry,
+        data={
+            **entry.data,
+            "token": {**entry.data["token"], "scope": "extapi:personal extapi:daily"},
+        },
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    requested = {call.args[0] for call in client.async_get_collection.call_args_list}
+    assert "daily_sleep" in requested
+    assert "heartrate" not in requested
+    assert "workout" not in requested
+    assert "daily_spo2" not in requested
+    assert hass.states.get("sensor.oura_v2_heart_rate_latest").state == "unavailable"
+    assert hass.states.get("sensor.oura_v2_sleep_score").state == "unknown"
