@@ -92,3 +92,7 @@ docker run --rm --network none -v "$PWD":/github/workspace:ro ghcr.io/home-assis
 ```
 
 Reference: [Oura API v2](https://cloud.ouraring.com/v2/docs), [Oura authentication](https://cloud.ouraring.com/docs/authentication), [Home Assistant integration documentation](https://contributors.home-assistant.io/core/integrations/).
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE), restored from the original repository license.
