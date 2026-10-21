@@ -2,10 +2,63 @@
   "title": "Oura V2",
   "config": {
     "abort": {
-      "already_configured": "This Oura account is already configured."
+      "already_configured": "This Oura account is already configured.",
+      "cannot_connect": "Cannot connect to Oura. Try again later.",
+      "cannot_identify_account": "Oura did not return an account identifier. Allow personal information access and try again.",
+      "missing_personal_permission": "Allow personal information access so Home Assistant can identify your Oura account.",
+      "wrong_account": "Reconnect the same Oura account that was originally configured.",
+      "reauth_identity_unknown": "The original account cannot be verified. Reload the integration while its existing authorization is valid, or remove and add it again.",
+      "reauth_successful": "Oura authorization was updated.",
+      "oauth_unauthorized": "Oura rejected the authorization. Try connecting again.",
+      "oauth_failed": "Oura authorization failed. Try again.",
+      "oauth_error": "Oura returned an invalid token.",
+      "oauth_timeout": "Oura authorization timed out.",
+      "authorize_url_timeout": "Generating the Oura authorization URL timed out.",
+      "missing_credentials": "Add your Oura OAuth application credentials first.",
+      "user_rejected_authorize": "Oura authorization was declined.",
+      "no_url_available": "Home Assistant could not determine an OAuth callback URL."
+    },
+    "step": {
+      "pick_implementation": {
+        "title": "Choose Oura application",
+        "data": {
+          "implementation": "Application"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect Oura",
+        "description": "Reconnect the same Oura account to restore access or update data permissions."
+      }
     }
   },
   "application_credentials": {
-    "description": "Create an OAuth2 app in the [Oura developer console]({console_url}). Set the redirect URI to https://my.home-assistant.io/redirect/oauth"
+    "description": "Create an OAuth2 app in the [Oura developer console]({console_url}). Set the redirect URI to {oauth_redirect_url}."
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Oura options",
+        "data": {
+          "scan_interval": "Polling interval (seconds)",
+          "use_webhooks": "Enable Oura webhooks"
+        },
+        "data_description": {
+          "scan_interval": "Between 300 and 86400 seconds. Default: 1800.",
+          "use_webhooks": "Requires an externally reachable HTTPS Home Assistant URL. Polling remains active as a fallback."
+        }
+      }
+    }
+  },
+  "services": {
+    "request_refresh": {
+      "name": "Request refresh",
+      "description": "Fetch the latest synced Oura data for one account or all loaded accounts.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry",
+          "description": "Optional Oura config entry to refresh; omit to refresh all accounts."
+        }
+      }
+    }
   }
 }

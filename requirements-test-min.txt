@@ -1,0 +1,5 @@
+# HA 2024.9.0 and its matching test helpers. Use Python 3.12.
+pytest-homeassistant-custom-component==0.13.161
+pytest-cov==5.0.0
+# acme 2.x uses ComparableX509, removed in josepy 2.x.
+josepy==1.14.0

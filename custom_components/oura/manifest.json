@@ -1,20 +1,20 @@
 {
   "domain": "oura",
   "name": "Oura V2",
-  "version": "1.0.0",
-  "documentation": "https://example.com/ha-oura",
-  "issue_tracker": "https://example.com/ha-oura/issues",
   "codeowners": [
-    "@your-github"
+    "@mkurdziel"
   ],
   "config_flow": true,
   "dependencies": [
     "application_credentials",
-    "auth"
+    "webhook"
   ],
-  "requirements": [],
+  "documentation": "https://github.com/mkurdziel/home-assistant-oura-v2",
   "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/mkurdziel/home-assistant-oura-v2/issues",
   "loggers": [
     "custom_components.oura"
-  ]
+  ],
+  "requirements": [],
+  "version": "1.1.0"
 }

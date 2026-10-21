@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
@@ -6,7 +5,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import OuraDataUpdateCoordinator, OuraData
+from .coordinator import OuraData, OuraDataUpdateCoordinator
 
 BUTTON_DESCRIPTION = ButtonEntityDescription(
     key="refresh_now",
@@ -14,11 +13,13 @@ BUTTON_DESCRIPTION = ButtonEntityDescription(
     icon="mdi:refresh",
 )
 
+
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator: OuraDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     device_info = hass.data[DOMAIN][entry.entry_id]["device_info"]
     uid_prefix = hass.data[DOMAIN][entry.entry_id]["uid_prefix"]
     async_add_entities([OuraRefreshButton(coordinator, device_info, uid_prefix)])
+
 
 class OuraRefreshButton(CoordinatorEntity[OuraData], ButtonEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC

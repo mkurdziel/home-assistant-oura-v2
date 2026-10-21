@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 DOMAIN = "oura"
@@ -20,6 +19,9 @@ OAUTH_SCOPES_DEFAULT = [
     "session",
     "tag",
     "spo2",
+    "heart_health",
 ]
 
 CONF_USE_SANDBOX = "use_sandbox"
+
+CONF_USE_WEBHOOKS = "use_webhooks"
