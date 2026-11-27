@@ -95,8 +95,9 @@ class OuraApiClient:
 
     def _rate_limit(self, headers: Any) -> OuraRateLimitError:
         now = asyncio.get_running_loop().time()
-        self._retry_at = max(self._retry_at, now + retry_seconds(headers))
-        return OuraRateLimitError(self._retry_at - now)
+        delay = max(retry_seconds(headers), self._retry_at - now)
+        self._retry_at = now + delay
+        return OuraRateLimitError(delay)
 
     async def async_ensure_token_valid(self) -> None:
         """Validate once before fan-out, so revoked refresh tokens aren't retried."""

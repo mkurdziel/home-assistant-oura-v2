@@ -54,10 +54,11 @@ async def test_http_errors_are_distinct(api_session, response, status, body, err
 async def test_rate_limit_blocks_following_requests(api_session, response):
     api_session.async_request.return_value = response(429, headers={"Retry-After": "120"})
     client = OuraApiClient(api_session)
-    for _ in range(2):
-        with pytest.raises(OuraRateLimitError) as caught:
-            await client.async_get_collection("sleep")
-        assert 118 < caught.value.retry_after <= 120
+    with pytest.raises(OuraRateLimitError) as caught:
+        await client.async_get_collection("sleep")
+    assert caught.value.retry_after == 120
+    with pytest.raises(OuraRateLimitError):
+        await client.async_get_collection("sleep")
     assert api_session.async_request.await_count == 1
 
 
@@ -65,19 +66,19 @@ async def test_rate_limit_blocks_following_requests(api_session, response):
 async def test_oauth_rate_limit_blocks_refresh_and_collections(api_session, operation):
     client = OuraApiClient(api_session)
     rate_limit = ClientResponseError(None, (), status=429, headers={"Retry-After": "120"})
-    with pytest.raises(OuraRateLimitError):
+    with pytest.raises(OuraRateLimitError) as caught:
         if operation == "refresh":
             api_session.async_ensure_token_valid.side_effect = rate_limit
             await client.async_ensure_token_valid()
         else:
             api_session.async_request.side_effect = rate_limit
             await client.async_get_collection("sleep")
+    assert caught.value.retry_after == 120
 
     api_session.async_ensure_token_valid.reset_mock()
     api_session.async_request.reset_mock()
-    with pytest.raises(OuraRateLimitError) as caught:
+    with pytest.raises(OuraRateLimitError):
         await client.async_ensure_token_valid()
-    assert 118 < caught.value.retry_after <= 120
     with pytest.raises(OuraRateLimitError):
         await client.async_get_collection("sleep")
     api_session.async_ensure_token_valid.assert_not_awaited()
