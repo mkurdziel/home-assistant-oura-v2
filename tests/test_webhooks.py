@@ -8,15 +8,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.oura.api import OuraApiError
 from custom_components.oura.webhooks import OuraWebhooks
 
 
 @pytest.fixture
-def manager(hass):
-    entry = MockConfigEntry(domain="oura", unique_id="account-1", data={"user_id": "account-1"})
+def manager(hass, mock_config_entry):
+    entry = mock_config_entry(domain="oura", unique_id="account-1", data={"user_id": "account-1"})
     entry.add_to_hass(hass)
     coordinator = MagicMock(scopes={"daily"}, async_process_event=AsyncMock())
     implementation = MagicMock(client_id="test-client", client_secret="test-secret")

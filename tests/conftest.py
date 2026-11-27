@@ -6,10 +6,22 @@ import pytest
 
 from custom_components.oura.coordinator import OuraData
 
+try:
+    from pytest_homeassistant.common import MockConfigEntry
+except ModuleNotFoundError as err:
+    if err.name != "pytest_homeassistant":
+        raise
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
 
 @pytest.fixture(autouse=True)
 def custom_integrations(enable_custom_integrations):
     yield
+
+
+@pytest.fixture
+def mock_config_entry():
+    return MockConfigEntry
 
 
 @pytest.fixture

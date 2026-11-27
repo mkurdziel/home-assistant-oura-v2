@@ -2,14 +2,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.exceptions import ServiceValidationError
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.oura.const import DOMAIN
 from custom_components.oura.diagnostics import async_get_config_entry_diagnostics
 
 
 @pytest.fixture
-def setup_entry(hass):
+def setup_entry(hass, mock_config_entry):
     async def fetch(collection, **params):
         if collection == "personal_info":
             return {"id": "account-1", "email": "private@example.invalid"}
@@ -40,7 +39,7 @@ def setup_entry(hass):
     client = MagicMock(
         async_ensure_token_valid=AsyncMock(), async_get_collection=AsyncMock(side_effect=fetch)
     )
-    entry = MockConfigEntry(
+    entry = mock_config_entry(
         domain=DOMAIN,
         unique_id=None,
         data={

@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+from aiohttp import ClientResponseError
 
 from custom_components.oura.api import (
     OuraApiClient,
@@ -60,6 +61,29 @@ async def test_rate_limit_blocks_following_requests(api_session, response):
     assert api_session.async_request.await_count == 1
 
 
+@pytest.mark.parametrize("operation", ["refresh", "request"])
+async def test_oauth_rate_limit_blocks_refresh_and_collections(api_session, operation):
+    client = OuraApiClient(api_session)
+    rate_limit = ClientResponseError(None, (), status=429, headers={"Retry-After": "120"})
+    with pytest.raises(OuraRateLimitError):
+        if operation == "refresh":
+            api_session.async_ensure_token_valid.side_effect = rate_limit
+            await client.async_ensure_token_valid()
+        else:
+            api_session.async_request.side_effect = rate_limit
+            await client.async_get_collection("sleep")
+
+    api_session.async_ensure_token_valid.reset_mock()
+    api_session.async_request.reset_mock()
+    with pytest.raises(OuraRateLimitError) as caught:
+        await client.async_ensure_token_valid()
+    assert 118 < caught.value.retry_after <= 120
+    with pytest.raises(OuraRateLimitError):
+        await client.async_get_collection("sleep")
+    api_session.async_ensure_token_valid.assert_not_awaited()
+    api_session.async_request.assert_not_awaited()
+
+
 async def test_transient_retry(api_session, response):
     api_session.async_request.side_effect = [response(503), response()]
     with patch("custom_components.oura.api.asyncio.sleep"):
@@ -87,8 +111,6 @@ async def test_sandbox_and_battery_latest(api_session, response):
 
 
 async def test_revoked_refresh_token_is_authentication_failure(api_session):
-    from aiohttp import ClientResponseError
-
     api_session.async_ensure_token_valid.side_effect = ClientResponseError(None, (), status=400)
     with pytest.raises(OuraAuthError):
         await OuraApiClient(api_session).async_ensure_token_valid()

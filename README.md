@@ -1,10 +1,10 @@
 # Oura V2 for Home Assistant
 
-A custom integration for the Oura Cloud API v2 with OAuth2, multiple accounts, 80 sensors, three binary sensors, and a refresh button per account. Requires Home Assistant **2024.9.0 or later**. Compatibility tests run against 2024.9.0 and 2026.10.2.
+A custom integration for the Oura Cloud API v2 with OAuth2, multiple accounts, 80 sensors, three binary sensors, and a refresh button per account. Requires Home Assistant **2024.9.0 or later**. Compatibility tests run against 2024.9.0 and 2026.11.3.
 
 ## Installation and authorization
 
-1. In HACS, add `https://github.com/mkurdziel/home-assistant-oura-v2` as a custom **Integration** repository and download Oura V2. Alternatively, copy `custom_components/oura/` into your Home Assistant configuration's `custom_components/` directory.
+1. In Marketplace (Home Assistant 2026.11 and later) or HACS, add `https://github.com/mkurdziel/home-assistant-oura-v2` as a custom **Integration** repository and download Oura V2. Alternatively, copy `custom_components/oura/` into your Home Assistant configuration's `custom_components/` directory.
 2. Restart Home Assistant.
 3. Create an OAuth application in the [Oura developer console](https://cloud.ouraring.com/oauth/applications). Register the callback URL shown by Home Assistant, normally `https://my.home-assistant.io/redirect/oauth` when My Home Assistant is enabled.
 4. Open **Settings → Devices & services → Add integration → Oura V2**, enter the application's client ID and secret, and authorize your account.

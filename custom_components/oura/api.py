@@ -88,8 +88,19 @@ class OuraApiClient:
         self._api_base = SANDBOX_API_BASE if use_sandbox else API_BASE
         self._retry_at = 0.0
 
+    def _check_cooldown(self) -> None:
+        remaining = self._retry_at - asyncio.get_running_loop().time()
+        if remaining > 0:
+            raise OuraRateLimitError(remaining)
+
+    def _rate_limit(self, headers: Any) -> OuraRateLimitError:
+        now = asyncio.get_running_loop().time()
+        self._retry_at = max(self._retry_at, now + retry_seconds(headers))
+        return OuraRateLimitError(self._retry_at - now)
+
     async def async_ensure_token_valid(self) -> None:
         """Validate once before fan-out, so revoked refresh tokens aren't retried."""
+        self._check_cooldown()
         try:
             async with asyncio.timeout(REQUEST_TIMEOUT):
                 await self._session.async_ensure_token_valid()
@@ -97,9 +108,7 @@ class OuraApiClient:
             if err.status in (400, 401, 403):
                 raise OuraAuthError("Oura token refresh requires reauthentication") from err
             if err.status == 429:
-                delay = retry_seconds(err.headers or {})
-                self._retry_at = asyncio.get_running_loop().time() + delay
-                raise OuraRateLimitError(delay) from err
+                raise self._rate_limit(err.headers or {}) from err
             raise OuraApiError("Oura token refresh failed", status=err.status) from err
         except (ClientError, TimeoutError) as err:
             raise OuraApiError("Cannot connect to Oura to refresh credentials") from err
@@ -107,9 +116,7 @@ class OuraApiClient:
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Fetch one page, with one bounded retry for transient failures."""
         for attempt in range(2):
-            remaining = self._retry_at - asyncio.get_running_loop().time()
-            if remaining > 0:
-                raise OuraRateLimitError(remaining)
+            self._check_cooldown()
             response = None
             try:
                 async with asyncio.timeout(REQUEST_TIMEOUT):
@@ -129,9 +136,7 @@ class OuraApiClient:
                         )
                         raise OuraPermissionError(reason)
                     if response.status == 429:
-                        delay = retry_seconds(response.headers)
-                        self._retry_at = asyncio.get_running_loop().time() + delay
-                        raise OuraRateLimitError(delay)
+                        raise self._rate_limit(response.headers)
                     if response.status >= 400:
                         raise OuraApiError(
                             f"Oura request failed (HTTP {response.status})", status=response.status
@@ -146,6 +151,8 @@ class OuraApiClient:
                 # These can also originate in OAuth2Session's token refresh.
                 if err.status in (400, 401, 403):
                     raise OuraAuthError("Oura credentials require reauthentication") from err
+                if err.status == 429:
+                    raise self._rate_limit(err.headers or {}) from err
                 failure = OuraApiError("Oura request failed", status=err.status)
             except (ClientError, TimeoutError, ValueError) as err:
                 failure = OuraApiError("Cannot read data from Oura")

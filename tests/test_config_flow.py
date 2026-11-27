@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.oura.config_flow import OAuth2FlowHandler, OuraOptionsFlow
 from custom_components.oura.const import DOMAIN
@@ -44,8 +43,8 @@ async def test_create_identifies_account_without_oauth_session(hass, response):
     assert "heart_health" in instance.extra_authorize_data["scope"].split()
 
 
-async def test_duplicate_account_aborts(hass, response):
-    entry = MockConfigEntry(domain=DOMAIN, unique_id="account-1", data=TOKEN)
+async def test_duplicate_account_aborts(hass, response, mock_config_entry):
+    entry = mock_config_entry(domain=DOMAIN, unique_id="account-1", data=TOKEN)
     entry.add_to_hass(hass)
     from homeassistant.data_entry_flow import AbortFlow
 
@@ -72,8 +71,8 @@ async def test_identity_request_errors(hass, response, reply, reason):
     assert result["reason"] == reason
 
 
-async def test_reauth_updates_original_entry(hass, response):
-    entry = MockConfigEntry(
+async def test_reauth_updates_original_entry(hass, response, mock_config_entry):
+    entry = mock_config_entry(
         domain=DOMAIN, unique_id="account-1", data={**TOKEN, "keep": "original"}
     )
     entry.add_to_hass(hass)
@@ -96,8 +95,8 @@ async def test_reauth_updates_original_entry(hass, response):
     reload.assert_awaited_once_with(entry.entry_id)
 
 
-async def test_reauth_wrong_account_is_rejected(hass, response):
-    entry = MockConfigEntry(domain=DOMAIN, unique_id="account-1", data=TOKEN)
+async def test_reauth_wrong_account_is_rejected(hass, response, mock_config_entry):
+    entry = mock_config_entry(domain=DOMAIN, unique_id="account-1", data=TOKEN)
     entry.add_to_hass(hass)
     instance = flow(hass, entry)
     await instance.async_step_reauth(entry.data)
@@ -110,8 +109,8 @@ async def test_reauth_wrong_account_is_rejected(hass, response):
     assert entry.data == TOKEN
 
 
-async def test_options_reject_short_polling(hass):
-    entry = MockConfigEntry(domain=DOMAIN, data=TOKEN)
+async def test_options_reject_short_polling(hass, mock_config_entry):
+    entry = mock_config_entry(domain=DOMAIN, data=TOKEN)
     entry.add_to_hass(hass)
     instance = OuraOptionsFlow()
     instance.hass = hass
